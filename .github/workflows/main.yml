@@ -1,5 +1,29 @@
 
-      - name: Unzip SaudaMitra source
+name: SaudaMitra - Unzip ZIP and Build APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - "SaudaMitra.zip"
+      - ".github/workflows/main.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build SaudaMitra Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify and unzip source ZIP
         shell: bash
         run: |
           set -euo pipefail
@@ -7,12 +31,109 @@
           ZIP_FILE="SaudaMitra.zip"
 
           if [ ! -f "$ZIP_FILE" ]; then
-            echo "ERROR: Source ZIP not found: $ZIP_FILE"
+            echo "::error::ZIP file not found: $ZIP_FILE"
+            echo "Upload the ZIP to the repository root."
             exit 1
           fi
 
-          mkdir -p extracted
-          unzip -q "$ZIP_FILE" -d extracted
+          mkdir -p "$GITHUB_WORKSPACE/source"
+          unzip -q "$ZIP_FILE" -d "$GITHUB_WORKSPACE/source"
 
           echo "ZIP extracted successfully."
-          find extracted -maxdepth 3 -type f | head -100
+          find "$GITHUB_WORKSPACE/source" -maxdepth 3 -type f \
+            | head -100
+
+      - name: Locate Android Gradle project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SOURCE_ROOT="$GITHUB_WORKSPACE/source"
+
+          SETTINGS_FILE="$(find "$SOURCE_ROOT" -type f \
+            \( -name settings.gradle \
+               -o -name settings.gradle.kts \) \
+            -print -quit)"
+
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "::error::No Gradle settings file found in the ZIP."
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
+
+          if [ ! -f "$PROJECT_DIR/app/build.gradle" ] && \
+             [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
+            echo "::error::Android app Gradle file not found."
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Found project at: $PROJECT_DIR"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          yes | sdkmanager --licenses >/dev/null || true
+
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      - name: Build debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "$PROJECT_DIR"
+
+          gradle --version
+
+          gradle clean assembleDebug \
+            --no-daemon \
+            --stacktrace
+
+      - name: Verify and prepare APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK_FILE="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -f "$APK_FILE" ]; then
+            echo "::error::APK was not generated."
+            find "$PROJECT_DIR" -type f -name "*.apk" || true
+            exit 1
+          fi
+
+          mkdir -p "$GITHUB_WORKSPACE/apk-output"
+
+          cp "$APK_FILE" \
+            "$GITHUB_WORKSPACE/apk-output/SaudaMitra-debug.apk"
+
+          ls -lh "$GITHUB_WORKSPACE/apk-output/SaudaMitra-debug.apk"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SaudaMitra-Android-APK
+          path: apk-output/SaudaMitra-debug.apk
+          if-no-files-found: error
+          retention-days: 14
