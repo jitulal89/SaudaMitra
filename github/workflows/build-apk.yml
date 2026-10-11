@@ -1,0 +1,19 @@
+```yaml
+      - name: Unzip SaudaMitra source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ZIP_FILE="SaudaMitra.zip"
+
+          if [ ! -f "$ZIP_FILE" ]; then
+            echo "ERROR: Source ZIP not found: $ZIP_FILE"
+            exit 1
+          fi
+
+          mkdir -p extracted
+          unzip -q "$ZIP_FILE" -d extracted
+
+          echo "ZIP extracted successfully."
+          find extracted -maxdepth 3 -type f | head -100
+```
