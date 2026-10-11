@@ -16,4 +16,3 @@
 
           echo "ZIP extracted successfully."
           find extracted -maxdepth 3 -type f | head -100
-```
